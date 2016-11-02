@@ -9,13 +9,16 @@
 #include <linux/cdev.h>
 #include <linux/fs.h>
 
+// Device number used for gamepad
+dev_t dev;
+
 
 static int gamepad_probe(struct platform_device *p_dev) {
+	int result;
+
 	printk("Device found for gamepad driver\n");
 
 	// Allocate device number
-	dev_t dev;
-	int result;
 	result = alloc_chrdev_region(&dev, 0, 1, "gamepad");
 	if (result != 0) {
 		return -1; // Failed to allocate device number
@@ -26,6 +29,9 @@ static int gamepad_probe(struct platform_device *p_dev) {
 }
 
 static int gamepad_remove(struct platform_device *p_dev) {
+	// Free device number
+	unregister_chrdev_region(dev, 1);
+
 	return 0;
 }
 
@@ -74,6 +80,9 @@ static int __init gamepad_init(void)
 static void __exit gamepad_cleanup(void)
 {
 	 printk("Short life for a small module...\n");
+
+	 // Unregister platform driver
+	 platform_driver_unregister(&gamepad_driver);
 }
 
 module_init(gamepad_init);
