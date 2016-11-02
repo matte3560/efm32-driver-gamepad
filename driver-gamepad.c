@@ -32,12 +32,16 @@ static int gamepad_release(struct inode *inode, struct file *filp) {
 
 // User program reads from the driver
 static ssize_t gamepad_read(struct file *filp, char __user *buff, size_t count, loff_t *offp) {
+	printk("Read\n");
+
 	return 0;
 }
 
 // User program writes to the driver
 static ssize_t gamepad_write(struct file *filp, const char __user *buff, size_t count, loff_t *offp) {
-	return 0;
+	printk("Write\n");
+
+	return count;
 }
 
 // File operations struct for cdev
