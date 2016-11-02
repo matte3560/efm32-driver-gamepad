@@ -6,11 +6,48 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
-#include <linux/cdev.h>
 #include <linux/fs.h>
+#include <linux/cdev.h>
 
 // Device number used for gamepad
-dev_t dev;
+dev_t gamepad_dev;
+
+// cdev struct
+struct cdev gamepad_cdev;
+
+// Class struct
+struct class *gamepad_cl;
+
+
+
+// User program opens the driver
+static int gamepad_open(struct inode *inode, struct file *filp) {
+	return 0;
+}
+
+// User program closes the driver
+static int gamepad_release(struct inode *inode, struct file *filp) {
+	return 0;
+}
+
+// User program reads from the driver
+static ssize_t gamepad_read(struct file *filp, char __user *buff, size_t count, loff_t *offp) {
+	return 0;
+}
+
+// User program writes to the driver
+static ssize_t gamepad_write(struct file *filp, const char __user *buff, size_t count, loff_t *offp) {
+	return 0;
+}
+
+// File operations struct for cdev
+static struct file_operations gamepad_fops = {
+	.owner = THIS_MODULE,
+	.read = gamepad_read,
+	.write = gamepad_write,
+	.open = gamepad_open,
+	.release = gamepad_release
+};
 
 
 static int gamepad_probe(struct platform_device *p_dev) {
@@ -19,18 +56,33 @@ static int gamepad_probe(struct platform_device *p_dev) {
 	printk("Device found for gamepad driver\n");
 
 	// Allocate device number
-	result = alloc_chrdev_region(&dev, 0, 1, "gamepad");
+	result = alloc_chrdev_region(&gamepad_dev, 1, 1, "gamepad");
 	if (result != 0) {
 		return -1; // Failed to allocate device number
 	}
-	printk("Device number allocated: major %i, minor %i\n", MAJOR(dev), MINOR(dev));
+	printk("Device number allocated: major %i, minor %i\n", MAJOR(gamepad_dev), MINOR(gamepad_dev));
+
+	// Initialize cdev
+	cdev_init(&gamepad_cdev, &gamepad_fops);
+	cdev_add(&gamepad_cdev, gamepad_dev, 1);
+
+	// Make visible in userspace
+	gamepad_cl = class_create(THIS_MODULE, "gamepad");
+	device_create(gamepad_cl, NULL, gamepad_dev, NULL, "gamepad");
 	
 	return 0;
 }
 
 static int gamepad_remove(struct platform_device *p_dev) {
+	// Delete class
+	device_destroy(gamepad_cl, gamepad_dev);
+	class_destroy(gamepad_cl);
+
+	// Delete cdev
+	cdev_del(&gamepad_cdev);
+
 	// Free device number
-	unregister_chrdev_region(dev, 1);
+	unregister_chrdev_region(gamepad_dev, 1);
 
 	return 0;
 }
