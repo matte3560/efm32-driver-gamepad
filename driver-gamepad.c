@@ -48,8 +48,6 @@ static int gamepad_release(struct inode *inode, struct file *filp) {
 
 // User program reads from the driver
 static ssize_t gamepad_read(struct file *filp, char __user *buff, size_t count, loff_t *offp) {
-	printk("Read %i bytes\n", count);
-
 	if (count >= 1) {
 		buff[0] = gamepad_input;
 	} else {
@@ -78,12 +76,8 @@ static struct file_operations gamepad_fops = {
 
 // Interrupt handler
 static irqreturn_t gamepad_irq_handler(int irq, void *dev_id) {
-	printk("Handled interrupt %i from gamepad\n", irq);
-
 	// Read input
 	gamepad_input = ioread32((uint32_t*)(gamepad_res->start + OFF_GPIO_PC_DIN));
-
-	printk("Read value: %x\n", gamepad_input);
 
 	// Clear interrupt
 	iowrite32(ioread32((uint32_t*)(gamepad_res->start + OFF_GPIO_IF)), (uint32_t*)(gamepad_res->start + OFF_GPIO_IFC));
