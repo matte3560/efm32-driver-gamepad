@@ -10,7 +10,12 @@
 #include <linux/cdev.h>
 #include <linux/interrupt.h>
 #include <linux/ioport.h>
+#include <linux/sched.h>
+#include <linux/mutex.h>
+
 #include <asm/io.h>
+#include <asm/siginfo.h>
+#include <asm/errno.h>
 
 #include "offsets.h"
 
@@ -34,15 +39,40 @@ static int gamepad_irq_odd;
 // Last read input
 static uint8_t gamepad_input;
 
+// PID of process to signal on interrupt
+int gamepad_pid = -1;
+struct mutex gamepad_pid_mutex; // Used to guard PID
+
 
 
 // User program opens the driver
 static int gamepad_open(struct inode *inode, struct file *filp) {
-	return 0;
+	// Lock PID mutex
+	mutex_lock(&gamepad_pid_mutex);
+	
+	if (gamepad_pid == -1) {
+		// No other processes using gamepad, set PID and unlock mutex
+		gamepad_pid = current->pid;
+		mutex_unlock(&gamepad_pid_mutex);
+
+		printk("Opened by PID %i\n", gamepad_pid);
+		return 0;
+	} else {
+		// Gamepad is already in use, unlock mutex
+		mutex_unlock(&gamepad_pid_mutex);
+
+		printk("Failed attempt to open by PID %i, device busy\n", current->pid);
+		return -EBUSY;
+	}
 }
 
 // User program closes the driver
 static int gamepad_release(struct inode *inode, struct file *filp) {
+	// Reset PID
+	mutex_lock(&gamepad_pid_mutex);
+	gamepad_pid = -1;
+	mutex_unlock(&gamepad_pid_mutex);
+
 	return 0;
 }
 
@@ -189,6 +219,9 @@ static int __init gamepad_init(void)
 
 	// Register platform driver
 	platform_driver_register(&gamepad_driver);
+
+	// Init PID mutex
+	mutex_init(&gamepad_pid_mutex);
 
 	return 0;
 }
