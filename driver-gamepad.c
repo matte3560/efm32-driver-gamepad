@@ -12,6 +12,7 @@
 #include <linux/ioport.h>
 #include <linux/sched.h>
 #include <linux/mutex.h>
+#include <linux/pid.h>
 
 #include <asm/io.h>
 #include <asm/siginfo.h>
@@ -39,27 +40,27 @@ static int gamepad_irq_odd;
 // Last read input
 static uint8_t gamepad_input;
 
-// PID of process to signal on interrupt
-int gamepad_pid = -1;
-struct mutex gamepad_pid_mutex; // Used to guard PID
+// Task struct of process to signal on interrupt
+static struct task_struct* gamepad_task = NULL;
+static struct mutex gamepad_task_mutex; // Used to guard task struct pointer
 
 
 
 // User program opens the driver
 static int gamepad_open(struct inode *inode, struct file *filp) {
-	// Lock PID mutex
-	mutex_lock(&gamepad_pid_mutex);
+	// Lock task mutex
+	mutex_lock(&gamepad_task_mutex);
 	
-	if (gamepad_pid == -1) {
-		// No other processes using gamepad, set PID and unlock mutex
-		gamepad_pid = current->pid;
-		mutex_unlock(&gamepad_pid_mutex);
+	if (gamepad_task == NULL) {
+		// No other processes using gamepad, set task and unlock mutex
+		gamepad_task = current;
+		mutex_unlock(&gamepad_task_mutex);
 
-		printk("Opened by PID %i\n", gamepad_pid);
+		printk("Opened by PID %i\n", current->pid);
 		return 0;
 	} else {
 		// Gamepad is already in use, unlock mutex
-		mutex_unlock(&gamepad_pid_mutex);
+		mutex_unlock(&gamepad_task_mutex);
 
 		printk("Failed attempt to open by PID %i, device busy\n", current->pid);
 		return -EBUSY;
@@ -68,10 +69,10 @@ static int gamepad_open(struct inode *inode, struct file *filp) {
 
 // User program closes the driver
 static int gamepad_release(struct inode *inode, struct file *filp) {
-	// Reset PID
-	mutex_lock(&gamepad_pid_mutex);
-	gamepad_pid = -1;
-	mutex_unlock(&gamepad_pid_mutex);
+	// Reset task pointer
+	mutex_lock(&gamepad_task_mutex);
+	gamepad_task = NULL;
+	mutex_unlock(&gamepad_task_mutex);
 
 	return 0;
 }
@@ -106,11 +107,16 @@ static struct file_operations gamepad_fops = {
 
 // Interrupt handler
 static irqreturn_t gamepad_irq_handler(int irq, void *dev_id) {
+	// Clear interrupt
+	iowrite32(ioread32((uint32_t*)(gamepad_res->start + OFF_GPIO_IF)), (uint32_t*)(gamepad_res->start + OFF_GPIO_IFC));
+
 	// Read input
 	gamepad_input = ioread32((uint32_t*)(gamepad_res->start + OFF_GPIO_PC_DIN));
 
-	// Clear interrupt
-	iowrite32(ioread32((uint32_t*)(gamepad_res->start + OFF_GPIO_IF)), (uint32_t*)(gamepad_res->start + OFF_GPIO_IFC));
+	// Send signal to program
+	if (gamepad_task != NULL) {
+		send_sig_info(SIGUSR1, SEND_SIG_NOINFO, gamepad_task);
+	}
 
 	return IRQ_HANDLED;
 }
@@ -220,8 +226,8 @@ static int __init gamepad_init(void)
 	// Register platform driver
 	platform_driver_register(&gamepad_driver);
 
-	// Init PID mutex
-	mutex_init(&gamepad_pid_mutex);
+	// Init task mutex
+	mutex_init(&gamepad_task_mutex);
 
 	return 0;
 }
