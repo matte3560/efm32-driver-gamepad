@@ -25,6 +25,12 @@
 #define CDEV_GAMEPAD "gamepad"
 #define CDEV_DAC "dac"
 
+/////////////////////////////////////////////////
+//                   GAMEPAD                   //
+/////////////////////////////////////////////////
+
+#define GAMEPAD_RESOURCE_NUM 0
+
 // Device number used for gamepad
 static dev_t gamepad_dev;
 
@@ -45,6 +51,25 @@ static uint8_t gamepad_input;
 // Task struct of process to signal on interrupt
 static struct task_struct* gamepad_task = NULL;
 static struct mutex gamepad_task_mutex; // Used to guard task struct pointer
+
+
+/////////////////////////////////////////////////
+//                     DAC                     //
+/////////////////////////////////////////////////
+
+#define DAC_RESOURCE_NUM 3
+
+// Device number used for dac
+static dev_t dac_dev;
+
+// cdev struct
+static struct cdev dac_cdev;
+
+// Class struct
+static struct class *dac_cl;
+
+// Platfom information
+static struct resource *dac_res;
 
 
 
@@ -123,14 +148,12 @@ static irqreturn_t gamepad_irq_handler(int irq, void *dev_id) {
 	return IRQ_HANDLED;
 }
 
-
-static int tdt4258_probe(struct platform_device *p_dev) {
+// Configure and enable gamepad hardware
+static int gamepad_probe(struct platform_device *p_dev) {
 	int result;
 
-	printk("Device found for gamepad driver\n");
-
 	// Get platform info
-	gamepad_res = platform_get_resource(p_dev, IORESOURCE_MEM, 0);
+	gamepad_res = platform_get_resource(p_dev, IORESOURCE_MEM, GAMEPAD_RESOURCE_NUM);
 	printk("Name: %s\n", gamepad_res->name);
 	printk("Base addr: %x\n", gamepad_res->start);
 	gamepad_irq_even = platform_get_irq(p_dev, 0);
@@ -168,6 +191,86 @@ static int tdt4258_probe(struct platform_device *p_dev) {
 	// Make visible in userspace
 	gamepad_cl = class_create(THIS_MODULE, CDEV_GAMEPAD);
 	device_create(gamepad_cl, NULL, gamepad_dev, NULL, CDEV_GAMEPAD);
+	
+	return 0;
+}
+
+
+// User program opens the driver
+static int dac_open(struct inode *inode, struct file *filp) {
+	printk("DAC open\n");
+	
+	return 0;
+}
+
+// User program closes the driver
+static int dac_release(struct inode *inode, struct file *filp) {
+	printk("DAC close\n");
+
+	return 0;
+}
+
+// User program reads from the driver
+static ssize_t dac_read(struct file *filp, char __user *buff, size_t count, loff_t *offp) {
+	printk("DAC read\n");
+
+	return 0;
+}
+
+// User program writes to the driver
+static ssize_t dac_write(struct file *filp, const char __user *buff, size_t count, loff_t *offp) {
+	printk("DAC write\n");
+
+	return count;
+}
+
+// File operations struct for cdev
+static struct file_operations dac_fops = {
+	.owner = THIS_MODULE,
+	.read = dac_read,
+	.write = dac_write,
+	.open = dac_open,
+	.release = dac_release
+};
+
+static int dac_probe(struct platform_device *p_dev) {
+	int result;
+
+	// Get platform info
+	dac_res = platform_get_resource(p_dev, IORESOURCE_MEM, DAC_RESOURCE_NUM);
+	printk("Name: %s\n", dac_res->name);
+	printk("Base addr: %x\n", dac_res->start);
+
+	// Allocate device number
+	result = alloc_chrdev_region(&dac_dev, 1, 1, CDEV_DAC);
+	if (result < 0) return -1; // Failed to allocate device number
+	printk("Device number allocated: major %i, minor %i\n", MAJOR(dac_dev), MINOR(dac_dev));
+
+	// Initialize cdev
+	cdev_init(&dac_cdev, &dac_fops);
+	result = cdev_add(&dac_cdev, dac_dev, 1);
+	if (result < 0) return -1; // Failed to add cdev
+
+	// Make visible in userspace
+	dac_cl = class_create(THIS_MODULE, CDEV_DAC);
+	device_create(dac_cl, NULL, dac_dev, NULL, CDEV_DAC);
+	
+	return 0;
+}
+
+
+static int tdt4258_probe(struct platform_device *p_dev) {
+	int result;
+
+	printk("Device found for gamepad driver\n");
+
+	// Configure gamepad
+	result = gamepad_probe(p_dev);
+	if (result != 0) return -1; // Failed to enable gamepad
+
+	// Configure dac
+	result = dac_probe(p_dev);
+	if (result != 0) return -1; // Failed to enable dac
 	
 	return 0;
 }
