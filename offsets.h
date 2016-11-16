@@ -41,3 +41,15 @@
 #define OFF_GPIO_IEN         (OFF_GPIO_PA_BASE + 0x110)
 #define OFF_GPIO_IFC         (OFF_GPIO_PA_BASE + 0x11c)
 #define OFF_GPIO_IF          (OFF_GPIO_PA_BASE + 0x114)
+
+// DAC
+#define OFF_DAC0_CTRL        0x000
+#define OFF_DAC0_CH0CTRL     0x008
+#define OFF_DAC0_CH1CTRL     0x00c
+#define OFF_DAC0_IEN         0x010
+#define OFF_DAC0_IF          0x014
+#define OFF_DAC0_IFS         0x018
+#define OFF_DAC0_IFC         0x01c
+#define OFF_DAC0_CH0DATA     0x020
+#define OFF_DAC0_CH1DATA     0x024
+#define OFF_DAC0_COMBDATA    0x028

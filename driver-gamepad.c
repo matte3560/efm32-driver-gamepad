@@ -19,6 +19,7 @@
 #include <asm/errno.h>
 
 #include "offsets.h"
+#include "efm32gg.h"
 
 // Device name
 #define DEVICE_NAME "tdt4258"
@@ -154,8 +155,7 @@ static int gamepad_probe(struct platform_device *p_dev) {
 
 	// Get platform info
 	gamepad_res = platform_get_resource(p_dev, IORESOURCE_MEM, GAMEPAD_RESOURCE_NUM);
-	printk("Name: %s\n", gamepad_res->name);
-	printk("Base addr: %x\n", gamepad_res->start);
+	printk("Gamepad base addr: %x\n", gamepad_res->start);
 	gamepad_irq_even = platform_get_irq(p_dev, 0);
 	gamepad_irq_odd = platform_get_irq(p_dev, 1);
 	printk("Interrupt even: %i, odd: %i\n", gamepad_irq_even, gamepad_irq_odd);
@@ -195,6 +195,28 @@ static int gamepad_probe(struct platform_device *p_dev) {
 	return 0;
 }
 
+// Disable gamepad hardware
+static void gamepad_remove(void) {
+	// Disable GPIO interrupt generation
+	iowrite32(0x0, (uint32_t*)(gamepad_res->start + OFF_GPIO_IEN));
+
+	// Unregister interrupt handler
+	free_irq(gamepad_irq_even, 0);
+	free_irq(gamepad_irq_odd, 0);
+
+	// Disable GPIO buttons
+	iowrite32(0x0, (uint32_t*)(gamepad_res->start + OFF_GPIO_PC_MODEL));
+
+	// Delete class
+	device_destroy(gamepad_cl, gamepad_dev);
+	class_destroy(gamepad_cl);
+
+	// Delete cdev
+	cdev_del(&gamepad_cdev);
+
+	// Free device number
+	unregister_chrdev_region(gamepad_dev, 1);
+}
 
 // User program opens the driver
 static int dac_open(struct inode *inode, struct file *filp) {
@@ -238,8 +260,16 @@ static int dac_probe(struct platform_device *p_dev) {
 
 	// Get platform info
 	dac_res = platform_get_resource(p_dev, IORESOURCE_MEM, DAC_RESOURCE_NUM);
-	printk("Name: %s\n", dac_res->name);
-	printk("Base addr: %x\n", dac_res->start);
+	printk("DAC base addr: %x\n", dac_res->start);
+
+	// Configure DAC
+	//*CMU_HFPERCLKEN0 |= CMU2_HFPERCLKEN0_DAC0;	// Enable clock
+	iowrite32(ioread32(CMU_HFPERCLKEN0) | CMU2_HFPERCLKEN0_DAC0, CMU_HFPERCLKEN0);
+	iowrite32(0x60000, PRS_CH0_CTRL);
+	iowrite32(1, (uint32_t*)(dac_res->start + OFF_DAC0_CH0CTRL)); // Enable channel 0
+	iowrite32(1, (uint32_t*)(dac_res->start + OFF_DAC0_CH1CTRL)); // Enable channel 1
+	iowrite32(0x3 | (0x7 << 15), (uint32_t*)(dac_res->start + OFF_DAC0_CTRL)); // Play same sound on both channels
+	iowrite32(100, (uint32_t*)(dac_res->start + OFF_DAC0_CH0DATA)); // Enable channel 0
 
 	// Allocate device number
 	result = alloc_chrdev_region(&dac_dev, 1, 1, CDEV_DAC);
@@ -258,6 +288,21 @@ static int dac_probe(struct platform_device *p_dev) {
 	return 0;
 }
 
+static void dac_remove(void) {
+	// Disable DAC
+	iowrite32(0, (uint32_t*)(dac_res->start + OFF_DAC0_CH0CTRL)); // Disable channel 0
+	iowrite32(0, (uint32_t*)(dac_res->start + OFF_DAC0_CH1CTRL)); // Disable channel 1
+
+	// Delete class
+	device_destroy(dac_cl, dac_dev);
+	class_destroy(dac_cl);
+
+	// Delete cdev
+	cdev_del(&dac_cdev);
+
+	// Free device number
+	unregister_chrdev_region(dac_dev, 1);
+}
 
 static int tdt4258_probe(struct platform_device *p_dev) {
 	int result;
@@ -276,25 +321,11 @@ static int tdt4258_probe(struct platform_device *p_dev) {
 }
 
 static int tdt4258_remove(struct platform_device *p_dev) {
-	// Disable GPIO interrupt generation
-	iowrite32(0x0, (uint32_t*)(gamepad_res->start + OFF_GPIO_IEN));
+	// Disable gamepad
+	gamepad_remove();
 
-	// Unregister interrupt handler
-	free_irq(gamepad_irq_even, 0);
-	free_irq(gamepad_irq_odd, 0);
-
-	// Disable GPIO buttons
-	iowrite32(0x0, (uint32_t*)(gamepad_res->start + OFF_GPIO_PC_MODEL));
-
-	// Delete class
-	device_destroy(gamepad_cl, gamepad_dev);
-	class_destroy(gamepad_cl);
-
-	// Delete cdev
-	cdev_del(&gamepad_cdev);
-
-	// Free device number
-	unregister_chrdev_region(gamepad_dev, 1);
+	// Disable dac
+	dac_remove();
 
 	return 0;
 }
