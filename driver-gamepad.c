@@ -21,7 +21,9 @@
 #include "offsets.h"
 
 // Device name
-#define DEVICE_NAME "gamepad"
+#define DEVICE_NAME "tdt4258"
+#define CDEV_GAMEPAD "gamepad"
+#define CDEV_DAC "dac"
 
 // Device number used for gamepad
 static dev_t gamepad_dev;
@@ -122,7 +124,7 @@ static irqreturn_t gamepad_irq_handler(int irq, void *dev_id) {
 }
 
 
-static int gamepad_probe(struct platform_device *p_dev) {
+static int tdt4258_probe(struct platform_device *p_dev) {
 	int result;
 
 	printk("Device found for gamepad driver\n");
@@ -141,10 +143,10 @@ static int gamepad_probe(struct platform_device *p_dev) {
 
 	// Register interrupt handler
 	result = request_irq(gamepad_irq_even, (irq_handler_t)gamepad_irq_handler,
-			0, DEVICE_NAME, 0);
+			0, CDEV_GAMEPAD, 0);
 	if (result != 0) return -1; // Failed to set up interrupts
 	result = request_irq(gamepad_irq_odd, (irq_handler_t)gamepad_irq_handler,
-			0, DEVICE_NAME, 0);
+			0, CDEV_GAMEPAD, 0);
 	if (result != 0) return -1; // Failed to set up interrupts
 
 	// Configure GPIO interrupt generation
@@ -154,7 +156,7 @@ static int gamepad_probe(struct platform_device *p_dev) {
 	iowrite32(0xff, (uint32_t*)(gamepad_res->start + OFF_GPIO_IEN));
 
 	// Allocate device number
-	result = alloc_chrdev_region(&gamepad_dev, 1, 1, DEVICE_NAME);
+	result = alloc_chrdev_region(&gamepad_dev, 1, 1, CDEV_GAMEPAD);
 	if (result < 0) return -1; // Failed to allocate device number
 	printk("Device number allocated: major %i, minor %i\n", MAJOR(gamepad_dev), MINOR(gamepad_dev));
 
@@ -164,13 +166,13 @@ static int gamepad_probe(struct platform_device *p_dev) {
 	if (result < 0) return -1; // Failed to add cdev
 
 	// Make visible in userspace
-	gamepad_cl = class_create(THIS_MODULE, DEVICE_NAME);
-	device_create(gamepad_cl, NULL, gamepad_dev, NULL, DEVICE_NAME);
+	gamepad_cl = class_create(THIS_MODULE, CDEV_GAMEPAD);
+	device_create(gamepad_cl, NULL, gamepad_dev, NULL, CDEV_GAMEPAD);
 	
 	return 0;
 }
 
-static int gamepad_remove(struct platform_device *p_dev) {
+static int tdt4258_remove(struct platform_device *p_dev) {
 	// Disable GPIO interrupt generation
 	iowrite32(0x0, (uint32_t*)(gamepad_res->start + OFF_GPIO_IEN));
 
@@ -194,24 +196,24 @@ static int gamepad_remove(struct platform_device *p_dev) {
 	return 0;
 }
 
-static const struct of_device_id gamepad_of_match[] = {
-	{ .compatible = "tdt4258", },
+static const struct of_device_id tdt4258_of_match[] = {
+	{ .compatible = DEVICE_NAME, },
 	{ },
 };
-MODULE_DEVICE_TABLE(of, gamepad_of_match);
+MODULE_DEVICE_TABLE(of, tdt4258_of_match);
 
-static struct platform_driver gamepad_driver = {
-	.probe = gamepad_probe,
-	.remove = gamepad_remove,
+static struct platform_driver tdt4258_driver = {
+	.probe = tdt4258_probe,
+	.remove = tdt4258_remove,
 	.driver = {
 		.name = DEVICE_NAME,
 		.owner = THIS_MODULE,
-		.of_match_table = gamepad_of_match,
+		.of_match_table = tdt4258_of_match,
 	},
 };
 
 /*
- * gamepad_init - function to insert this module into kernel space
+ * tdt4258_init - function to insert this module into kernel space
  *
  * This is the first of two exported functions to handle inserting this
  * code into a running kernel
@@ -219,12 +221,12 @@ static struct platform_driver gamepad_driver = {
  * Returns 0 if successfull, otherwise -1
  */
 
-static int __init gamepad_init(void)
+static int __init tdt4258_init(void)
 {
 	printk("Hello World, here is your module speaking\n");
 
 	// Register platform driver
-	platform_driver_register(&gamepad_driver);
+	platform_driver_register(&tdt4258_driver);
 
 	// Init task mutex
 	mutex_init(&gamepad_task_mutex);
@@ -233,22 +235,22 @@ static int __init gamepad_init(void)
 }
 
 /*
- * gamepad_cleanup - function to cleanup this module from kernel space
+ * tdt4258_cleanup - function to cleanup this module from kernel space
  *
  * This is the second of two exported functions to handle cleanup this
  * code from a running kernel
  */
 
-static void __exit gamepad_cleanup(void)
+static void __exit tdt4258_cleanup(void)
 {
 	 printk("Short life for a small module...\n");
 
 	 // Unregister platform driver
-	 platform_driver_unregister(&gamepad_driver);
+	 platform_driver_unregister(&tdt4258_driver);
 }
 
-module_init(gamepad_init);
-module_exit(gamepad_cleanup);
+module_init(tdt4258_init);
+module_exit(tdt4258_cleanup);
 
 MODULE_DESCRIPTION("Module for accessing gamepad buttons.");
 MODULE_LICENSE("GPL");
