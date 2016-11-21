@@ -240,6 +240,9 @@ static void gamepad_remove(void) {
 
 // Start DAC playback
 static void dac_start_playback(void) {
+	// Disable GPIO interrupts during playback
+	iowrite32(0, gamepad_mem + OFF_GPIO_IEN);
+
 	// Enable DAC
 	iowrite32(1, dac_mem + OFF_DAC0_CH0CTRL); // Disable channel 0
 	iowrite32(1, dac_mem + OFF_DAC0_CH1CTRL); // Disable channel 1
@@ -258,6 +261,9 @@ static void dac_stop_playback(void) {
 	// Disable timer
 	iowrite32(0, dac_timer_mem + OFF_TIMER_IEN); // Disable interrupt generation
 	iowrite32(0b01, dac_timer_mem + OFF_TIMER_CMD); // Send stop command
+
+	// Reenable GPIO interrupts when playback stops
+	iowrite32(0xff, gamepad_mem + OFF_GPIO_IEN);
 }
 
 // Set DAC note frequency
@@ -301,7 +307,7 @@ static ssize_t dac_write(struct file *filp, const char __user *buff, size_t coun
 	int result;
 	int freq;
 
-	if (count > 1) {
+	if (count > 0) {
 		// Parse frequency input
 		result = sscanf(buff, "%d", &(freq));
 		if (result >= 0) {
