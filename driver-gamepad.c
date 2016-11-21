@@ -60,6 +60,7 @@ static struct mutex gamepad_task_mutex; // Used to guard task struct pointer
 /////////////////////////////////////////////////
 
 #define DAC_RESOURCE_NUM 3
+#define DAC_TIMER_RESOURCE_NUM 1
 
 // Device number used for dac
 static dev_t dac_dev;
@@ -73,6 +74,17 @@ static struct class *dac_cl;
 // Platfom information
 static struct resource *dac_res;
 static void* dac_mem;
+
+// Playback information
+static struct {
+	bool high; // Should the output signal to the dac be high or low?
+	int amplitude; // The amplitude of the output signal
+} dac_state;
+
+// DAC sample timer
+static struct resource *dac_timer_res;
+static void* dac_timer_mem;
+static int dac_timer_irq;
 
 
 
@@ -137,9 +149,6 @@ static struct file_operations gamepad_fops = {
 
 // Interrupt handler
 static irqreturn_t gamepad_irq_handler(int irq, void *dev_id) {
-	// Clear interrupt
-	iowrite32(ioread32(gamepad_mem + OFF_GPIO_IF), gamepad_mem + OFF_GPIO_IFC);
-
 	// Read input
 	gamepad_input = ioread32(gamepad_mem + OFF_GPIO_PC_DIN);
 
@@ -147,6 +156,9 @@ static irqreturn_t gamepad_irq_handler(int irq, void *dev_id) {
 	if (gamepad_task != NULL) {
 		send_sig_info(SIGUSR1, SEND_SIG_NOINFO, gamepad_task);
 	}
+
+	// Clear interrupt
+	iowrite32(ioread32(gamepad_mem + OFF_GPIO_IF), gamepad_mem + OFF_GPIO_IFC);
 
 	return IRQ_HANDLED;
 }
@@ -263,19 +275,51 @@ static struct file_operations dac_fops = {
 	.release = dac_release
 };
 
+// Interrupt handler
+static irqreturn_t dac_timer_irq_handler(int irq, void *dev_id) {
+	// Write sample to dac
+	iowrite32(dac_state.high * dac_state.amplitude, dac_mem + OFF_DAC0_CH0DATA);
+	iowrite32(dac_state.high * dac_state.amplitude, dac_mem + OFF_DAC0_CH1DATA);
+	dac_state.high = !dac_state.high; // Toggle sample high state
+
+	// Clear interrupt
+	iowrite32(1, dac_timer_mem + OFF_TIMER_IFC);
+
+	return IRQ_HANDLED;
+}
+
 static int dac_probe(struct platform_device *p_dev) {
 	int result;
 
 	// Get platform info
 	dac_res = platform_get_resource(p_dev, IORESOURCE_MEM, DAC_RESOURCE_NUM);
 	printk("DAC base addr: %x\n", dac_res->start);
+	dac_timer_res = platform_get_resource(p_dev, IORESOURCE_MEM, DAC_TIMER_RESOURCE_NUM);
+	printk("DAC sample timer base addr: %x\n", dac_timer_res->start);
+	dac_timer_irq = platform_get_irq(p_dev, 2);
+	printk("Timer interrupt number: %i\n", dac_timer_irq);
 
 	// Map memory region
 	dac_mem = ioremap_nocache(dac_res->start, dac_res->end - dac_res->start);
+	dac_timer_mem = ioremap_nocache(dac_timer_res->start, dac_timer_res->end - dac_timer_res->start);
 
 	// Configure DAC
+	iowrite32(0x50010 | (0x01 << 2), dac_mem + OFF_DAC0_CTRL); // Set prescaler, sample and hold mode
 	iowrite32(1, dac_mem + OFF_DAC0_CH0CTRL); // Enable channel 0
 	iowrite32(1, dac_mem + OFF_DAC0_CH1CTRL); // Enable channel 1
+	dac_state.high = false;
+	dac_state.amplitude = 5;
+
+	// Register interrupt handler
+	result = request_irq(dac_timer_irq, (irq_handler_t)dac_timer_irq_handler,
+			0, CDEV_DAC, 0);
+	if (result != 0) return -1; // Failed to set up interrupts
+
+	// Configure sample timer
+	iowrite32(ioread32(dac_timer_mem + OFF_TIMER_CTRL) | (7 << 24), dac_timer_mem + OFF_TIMER_CTRL); // Set HFPERCLK prescaler to divide by 128
+	iowrite32(547, dac_timer_mem + OFF_TIMER_TOP); // Set period (547 = 400Hz note)
+	iowrite32(1, dac_timer_mem + OFF_TIMER_IEN); // Enable interrupt generation
+	iowrite32(0b1, dac_timer_mem + OFF_TIMER_CMD); // Send start command
 
 	// Allocate device number
 	result = alloc_chrdev_region(&dac_dev, 1, 1, CDEV_DAC);
@@ -299,8 +343,16 @@ static void dac_remove(void) {
 	iowrite32(0, dac_mem + OFF_DAC0_CH0CTRL); // Disable channel 0
 	iowrite32(0, dac_mem + OFF_DAC0_CH1CTRL); // Disable channel 1
 
+	// Disable timer
+	iowrite32(0, dac_timer_mem + OFF_TIMER_IEN); // Disable interrupt generation
+	iowrite32(0b01, dac_timer_mem + OFF_TIMER_CMD); // Send stop command
+
+	// Unregister interrupt handler
+	free_irq(dac_timer_irq, 0);
+
 	// Unmap memory region
 	iounmap(dac_mem);
+	iounmap(dac_timer_mem);
 
 	// Delete class
 	device_destroy(dac_cl, dac_dev);

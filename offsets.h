@@ -53,3 +53,11 @@
 #define OFF_DAC0_CH0DATA     0x020
 #define OFF_DAC0_CH1DATA     0x024
 #define OFF_DAC0_COMBDATA    0x028
+
+// Timer
+#define OFF_TIMER_CTRL          0x00
+#define OFF_TIMER_CMD           0x04
+#define OFF_TIMER_IEN           0x0c
+#define OFF_TIMER_IFC           0x18
+#define OFF_TIMER_TOP           0x1c
+#define OFF_TIMER_CNT           0x24
