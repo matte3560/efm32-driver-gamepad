@@ -72,6 +72,7 @@ static struct class *dac_cl;
 
 // Platfom information
 static struct resource *dac_res;
+static void* dac_mem;
 
 
 
@@ -269,14 +270,12 @@ static int dac_probe(struct platform_device *p_dev) {
 	dac_res = platform_get_resource(p_dev, IORESOURCE_MEM, DAC_RESOURCE_NUM);
 	printk("DAC base addr: %x\n", dac_res->start);
 
+	// Map memory region
+	dac_mem = ioremap_nocache(dac_res->start, dac_res->end - dac_res->start);
+
 	// Configure DAC
-	//*CMU_HFPERCLKEN0 |= CMU2_HFPERCLKEN0_DAC0;	// Enable clock
-	iowrite32(ioread32(CMU_HFPERCLKEN0) | CMU2_HFPERCLKEN0_DAC0, CMU_HFPERCLKEN0);
-	iowrite32(0x60000, PRS_CH0_CTRL);
-	iowrite32(1, (uint32_t*)(dac_res->start + OFF_DAC0_CH0CTRL)); // Enable channel 0
-	iowrite32(1, (uint32_t*)(dac_res->start + OFF_DAC0_CH1CTRL)); // Enable channel 1
-	iowrite32(0x3 | (0x7 << 15), (uint32_t*)(dac_res->start + OFF_DAC0_CTRL)); // Play same sound on both channels
-	iowrite32(100, (uint32_t*)(dac_res->start + OFF_DAC0_CH0DATA)); // Enable channel 0
+	iowrite32(1, dac_mem + OFF_DAC0_CH0CTRL); // Enable channel 0
+	iowrite32(1, dac_mem + OFF_DAC0_CH1CTRL); // Enable channel 1
 
 	// Allocate device number
 	result = alloc_chrdev_region(&dac_dev, 1, 1, CDEV_DAC);
@@ -297,8 +296,11 @@ static int dac_probe(struct platform_device *p_dev) {
 
 static void dac_remove(void) {
 	// Disable DAC
-	iowrite32(0, (uint32_t*)(dac_res->start + OFF_DAC0_CH0CTRL)); // Disable channel 0
-	iowrite32(0, (uint32_t*)(dac_res->start + OFF_DAC0_CH1CTRL)); // Disable channel 1
+	iowrite32(0, dac_mem + OFF_DAC0_CH0CTRL); // Disable channel 0
+	iowrite32(0, dac_mem + OFF_DAC0_CH1CTRL); // Disable channel 1
+
+	// Unmap memory region
+	iounmap(dac_mem);
 
 	// Delete class
 	device_destroy(dac_cl, dac_dev);
