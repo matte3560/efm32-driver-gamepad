@@ -146,7 +146,6 @@ static struct file_operations gamepad_fops = {
 	.release = gamepad_release
 };
 
-
 // Interrupt handler
 static irqreturn_t gamepad_irq_handler(int irq, void *dev_id) {
 	// Read input
@@ -238,6 +237,44 @@ static void gamepad_remove(void) {
 	unregister_chrdev_region(gamepad_dev, 1);
 }
 
+
+// Start DAC playback
+static void dac_start_playback(void) {
+	// Enable DAC
+	iowrite32(1, dac_mem + OFF_DAC0_CH0CTRL); // Disable channel 0
+	iowrite32(1, dac_mem + OFF_DAC0_CH1CTRL); // Disable channel 1
+
+	// Enable timer
+	iowrite32(1, dac_timer_mem + OFF_TIMER_IEN); // Enable interrupt generation
+	iowrite32(0b1, dac_timer_mem + OFF_TIMER_CMD); // Send start command
+}
+
+// Disable DAC playback
+static void dac_stop_playback(void) {
+	// Disable DAC
+	iowrite32(0, dac_mem + OFF_DAC0_CH0CTRL); // Disable channel 0
+	iowrite32(0, dac_mem + OFF_DAC0_CH1CTRL); // Disable channel 1
+
+	// Disable timer
+	iowrite32(0, dac_timer_mem + OFF_TIMER_IEN); // Disable interrupt generation
+	iowrite32(0b01, dac_timer_mem + OFF_TIMER_CMD); // Send stop command
+}
+
+// Set DAC note frequency
+static void dac_set_freq(uint32_t freq) {
+	const uint32_t clk = 14000000/128; // Timer clock after prescale
+	uint32_t period;
+
+	// Calculate new timer period
+	period = clk/(freq/2);
+
+	// Set timer period
+	iowrite32(period, dac_timer_mem + OFF_TIMER_TOP);
+
+	// Start playback
+	dac_start_playback();
+}
+
 // User program opens the driver
 static int dac_open(struct inode *inode, struct file *filp) {
 	printk("DAC open\n");
@@ -261,7 +298,22 @@ static ssize_t dac_read(struct file *filp, char __user *buff, size_t count, loff
 
 // User program writes to the driver
 static ssize_t dac_write(struct file *filp, const char __user *buff, size_t count, loff_t *offp) {
-	printk("DAC write\n");
+	int result;
+	int freq;
+
+	if (count > 1) {
+		// Parse frequency input
+		result = sscanf(buff, "%d", &(freq));
+		if (result >= 0) {
+			if (freq > 0) {
+				dac_set_freq(freq);
+			} else {
+				dac_stop_playback();
+			}
+		} else {
+			printk("Failed to parse frequency, error code %i\n", result);
+		}
+	}
 
 	return count;
 }
@@ -305,8 +357,6 @@ static int dac_probe(struct platform_device *p_dev) {
 
 	// Configure DAC
 	iowrite32(0x50010 | (0x01 << 2), dac_mem + OFF_DAC0_CTRL); // Set prescaler, sample and hold mode
-	iowrite32(1, dac_mem + OFF_DAC0_CH0CTRL); // Enable channel 0
-	iowrite32(1, dac_mem + OFF_DAC0_CH1CTRL); // Enable channel 1
 	dac_state.high = false;
 	dac_state.amplitude = 5;
 
@@ -317,9 +367,6 @@ static int dac_probe(struct platform_device *p_dev) {
 
 	// Configure sample timer
 	iowrite32(ioread32(dac_timer_mem + OFF_TIMER_CTRL) | (7 << 24), dac_timer_mem + OFF_TIMER_CTRL); // Set HFPERCLK prescaler to divide by 128
-	iowrite32(547, dac_timer_mem + OFF_TIMER_TOP); // Set period (547 = 400Hz note)
-	iowrite32(1, dac_timer_mem + OFF_TIMER_IEN); // Enable interrupt generation
-	iowrite32(0b1, dac_timer_mem + OFF_TIMER_CMD); // Send start command
 
 	// Allocate device number
 	result = alloc_chrdev_region(&dac_dev, 1, 1, CDEV_DAC);
@@ -339,13 +386,8 @@ static int dac_probe(struct platform_device *p_dev) {
 }
 
 static void dac_remove(void) {
-	// Disable DAC
-	iowrite32(0, dac_mem + OFF_DAC0_CH0CTRL); // Disable channel 0
-	iowrite32(0, dac_mem + OFF_DAC0_CH1CTRL); // Disable channel 1
-
-	// Disable timer
-	iowrite32(0, dac_timer_mem + OFF_TIMER_IEN); // Disable interrupt generation
-	iowrite32(0b01, dac_timer_mem + OFF_TIMER_CMD); // Send stop command
+	// Stop DAC
+	dac_stop_playback();
 
 	// Unregister interrupt handler
 	free_irq(dac_timer_irq, 0);
