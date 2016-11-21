@@ -43,6 +43,7 @@ static struct class *gamepad_cl;
 
 // Platfom information
 static struct resource *gamepad_res;
+static void* gamepad_mem;
 static int gamepad_irq_even;
 static int gamepad_irq_odd;
 
@@ -136,10 +137,10 @@ static struct file_operations gamepad_fops = {
 // Interrupt handler
 static irqreturn_t gamepad_irq_handler(int irq, void *dev_id) {
 	// Clear interrupt
-	iowrite32(ioread32((uint32_t*)(gamepad_res->start + OFF_GPIO_IF)), (uint32_t*)(gamepad_res->start + OFF_GPIO_IFC));
+	iowrite32(ioread32(gamepad_mem + OFF_GPIO_IF), gamepad_mem + OFF_GPIO_IFC);
 
 	// Read input
-	gamepad_input = ioread32((uint32_t*)(gamepad_res->start + OFF_GPIO_PC_DIN));
+	gamepad_input = ioread32(gamepad_mem + OFF_GPIO_PC_DIN);
 
 	// Send signal to program
 	if (gamepad_task != NULL) {
@@ -160,9 +161,12 @@ static int gamepad_probe(struct platform_device *p_dev) {
 	gamepad_irq_odd = platform_get_irq(p_dev, 1);
 	printk("Interrupt even: %i, odd: %i\n", gamepad_irq_even, gamepad_irq_odd);
 
+	// Map memory region
+	gamepad_mem = ioremap_nocache(gamepad_res->start, gamepad_res->end - gamepad_res->start);
+
 	// Configure GPIO buttons
-	iowrite32(0x33333333, (uint32_t*)(gamepad_res->start + OFF_GPIO_PC_MODEL));
-	iowrite32(0xFF, (uint32_t*)(gamepad_res->start + OFF_GPIO_PC_DOUT));
+	iowrite32(0x33333333, gamepad_mem + OFF_GPIO_PC_MODEL);
+	iowrite32(0xFF, gamepad_mem + OFF_GPIO_PC_DOUT);
 
 	// Register interrupt handler
 	result = request_irq(gamepad_irq_even, (irq_handler_t)gamepad_irq_handler,
@@ -173,10 +177,10 @@ static int gamepad_probe(struct platform_device *p_dev) {
 	if (result != 0) return -1; // Failed to set up interrupts
 
 	// Configure GPIO interrupt generation
-	iowrite32(0x22222222, (uint32_t*)(gamepad_res->start + OFF_GPIO_EXTIPSELL));
-	iowrite32(0xff, (uint32_t*)(gamepad_res->start + OFF_GPIO_EXTIFALL));
-	iowrite32(0xff, (uint32_t*)(gamepad_res->start + OFF_GPIO_EXTIRISE));
-	iowrite32(0xff, (uint32_t*)(gamepad_res->start + OFF_GPIO_IEN));
+	iowrite32(0x22222222, gamepad_mem + OFF_GPIO_EXTIPSELL);
+	iowrite32(0xff, gamepad_mem + OFF_GPIO_EXTIFALL);
+	iowrite32(0xff, gamepad_mem + OFF_GPIO_EXTIRISE);
+	iowrite32(0xff, gamepad_mem + OFF_GPIO_IEN);
 
 	// Allocate device number
 	result = alloc_chrdev_region(&gamepad_dev, 1, 1, CDEV_GAMEPAD);
@@ -198,14 +202,17 @@ static int gamepad_probe(struct platform_device *p_dev) {
 // Disable gamepad hardware
 static void gamepad_remove(void) {
 	// Disable GPIO interrupt generation
-	iowrite32(0x0, (uint32_t*)(gamepad_res->start + OFF_GPIO_IEN));
+	iowrite32(0x0, gamepad_mem + OFF_GPIO_IEN);
 
 	// Unregister interrupt handler
 	free_irq(gamepad_irq_even, 0);
 	free_irq(gamepad_irq_odd, 0);
 
 	// Disable GPIO buttons
-	iowrite32(0x0, (uint32_t*)(gamepad_res->start + OFF_GPIO_PC_MODEL));
+	iowrite32(0x0, gamepad_mem + OFF_GPIO_PC_MODEL);
+
+	// Unmap memory region
+	iounmap(gamepad_mem);
 
 	// Delete class
 	device_destroy(gamepad_cl, gamepad_dev);
